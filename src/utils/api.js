@@ -1,4 +1,3 @@
-
 const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY;
 
@@ -55,7 +54,7 @@ export const callGPT = async (messages, systemPrompt) => {
 };
 
 /**
- * Render Markdown ke HTML (Support: Bold, Italic, List, Table, Br)
+ * Render Markdown ke HTML (Support: Bold, Italic, List, Table, Heading, LaTeX)
  */
 export const renderMarkdown = (text) => {
   if (!text) return '';
@@ -64,7 +63,15 @@ export const renderMarkdown = (text) => {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/^- (.+)/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul class="list-disc pl-5 space-y-1 my-2">$1</ul>');
+    .replace(/(<li>.*<\/li>)/gs, '<ul class="list-disc pl-5 space-y-1 my-2">$1</ul>')
+    // Heading Handlers
+    .replace(/^#### (.+)/gm, '<h4 class="text-sm font-black text-slate-800 mt-4 mb-1">$1</h4>')
+    .replace(/^### (.+)/gm, '<h3 class="text-base font-black text-slate-800 mt-5 mb-2">$1</h3>')
+    .replace(/^## (.+)/gm, '<h2 class="text-lg font-black text-slate-800 mt-6 mb-2">$1</h2>')
+    // LaTeX Block Handler
+    .replace(/\\\[([\s\S]*?)\\\]/g, '<div class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 my-3 font-mono text-xs text-slate-700 overflow-x-auto">$1</div>')
+    // LaTeX Inline Handler
+    .replace(/\\\(([\s\S]*?)\\\)/g, '<code class="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-mono text-slate-700">$1</code>');
 
   // Table Processor
   const lines = html.split('\n');
