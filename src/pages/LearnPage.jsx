@@ -17,7 +17,6 @@ const LearnPage = ({ mode, setMode }) => {
   const [errorMsg, setErrorMsg] = useState(null);
   const [copied, setCopied] = useState(false);
 
-  // Latihan Mode States
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [concepts, setConcepts] = useState([]);
   const [phase, setPhase] = useState('idle'); 
@@ -25,16 +24,13 @@ const LearnPage = ({ mode, setMode }) => {
   const [hintLevel, setHintLevel] = useState(0);
   const [loadingHint, setLoadingHint] = useState(false);
 
-  // Interaction States
   const [parsedOptions, setParsedOptions] = useState([]);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
 
-  // Loading & Style States
   const [loadingStep, setLoadingStep] = useState(null);
   const [loadingTimer, setLoadingTimer] = useState(0);
   const [soalStyle, setSoalStyle] = useState('standard');
 
-  // Stats & Performance
   const [scoreStatus, setScoreStatus] = useState(null);
   const [sessionStats, setSessionStats] = useState({ correct: 0, partial: 0, wrong: 0, total: 0 });
 
@@ -85,12 +81,29 @@ const LearnPage = ({ mode, setMode }) => {
     const optionRegex = /^([A-E])\.\s+(.+)/;
     const options = [];
     const questionLines = [];
-    lines.forEach(line => {
+
+    const filteredLines = lines.filter(line => {
+      const t = line.trim();
+      return !t.match(/^soal tka/i) &&
+             !t.match(/^soal latihan/i) &&
+             !t.match(/^\*\*soal/i) &&
+             !t.match(/^---/);
+    });
+
+    filteredLines.forEach(line => {
       const match = line.trim().match(optionRegex);
       if (match) options.push({ label: match[1], text: match[2].trim() });
       else questionLines.push(line);
     });
-    return { cleanQuestion: questionLines.join('\n').trim(), options };
+
+    const seenLabels = new Set();
+    const uniqueOptions = options.filter(opt => {
+      if (seenLabels.has(opt.label)) return false;
+      seenLabels.add(opt.label);
+      return true;
+    });
+
+    return { cleanQuestion: questionLines.join('\n').trim(), options: uniqueOptions };
   };
 
   const copyToClipboard = () => {
@@ -133,7 +146,7 @@ const LearnPage = ({ mode, setMode }) => {
     await new Promise(r => setTimeout(r, 600));
     
     setLoadingStep('generating');
-    let system = `Kamu Gozo AI. Buat 1 soal TKA ${mode.toUpperCase()} level SMP kelas 9 yang ${soalStyle === 'challenging' ? 'menantang multi-langkah' : soalStyle === 'story' ? 'berbasis cerita naratif' : 'realistis'}. Tampilkan soal saja, jangan bocorkan jawaban. Sertakan pilihan A-E.`;
+    let system = `Kamu Gozo AI. Buat 1 soal TKA ${mode.toUpperCase()} level SMP kelas 9 yang ${soalStyle === 'challenging' ? 'menantang multi-langkah' : soalStyle === 'story' ? 'berbasis cerita naratif' : 'realistis'}. Tampilkan soal saja, sertakan pilihan A-E.`;
     
     const rawQuestion = await callQwen([{ role: 'user', content: "Berikan saya 1 soal latihan." }], system);
 
@@ -156,16 +169,30 @@ const LearnPage = ({ mode, setMode }) => {
         if (res) {
           try {
             const parsed = JSON.parse(res.replace(/```json|```/g, '').trim());
-            setConcepts(parsed.concepts || []);
-            saveSession({ currentQuestion: cleanQuestion, parsedOptions: options, concepts: parsed.concepts, phase: 'menjawab' });
+            const detected = parsed.concepts || [];
+            setConcepts(detected);
+            saveSession({ currentQuestion: cleanQuestion, parsedOptions: options, concepts: detected, phase: 'menjawab' });
           } catch (e) { setConcepts([]); }
         }
       });
 
-      saveSession({ currentQuestion: cleanQuestion, parsedOptions: options, concepts: [], phase: 'menjawab', hints: [], hintLevel: 0, scoreStatus: null, result: '', mode, soalStyle, selectedAnswer: null });
+      saveSession({
+        currentQuestion: cleanQuestion,
+        parsedOptions: options,
+        concepts: [],
+        phase: 'menjawab',
+        hints: [],
+        hintLevel: 0,
+        scoreStatus: null,
+        result: '',
+        mode,
+        soalStyle,
+        selectedAnswer: null
+      });
     } else {
       clearInterval(timerInterval); 
       setLoadingStep(null);
+      setLoadingTimer(0);
       setErrorMsg("Gagal generate soal. Coba lagi.");
     }
   };
@@ -202,7 +229,7 @@ const LearnPage = ({ mode, setMode }) => {
       setPhase('selesai');
       saveSession({ scoreStatus: status, result: cleanText, phase: 'selesai' });
 
-      // Save to History
+      // SAVE TO HISTORY
       const historyItem = {
         id: Date.now(),
         timestamp: new Date().toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
@@ -270,6 +297,7 @@ const LearnPage = ({ mode, setMode }) => {
         ))}
       </div>
 
+      {/* Category Toggle */}
       <div className="flex gap-1.5 p-1 bg-slate-200/40 rounded-xl">
         {['numerasi', 'literasi'].map((cat) => (
           <button key={cat} onClick={() => setMode(cat)}
@@ -289,7 +317,7 @@ const LearnPage = ({ mode, setMode }) => {
                   <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 mx-auto">
                     <Target size={28} />
                   </div>
-                  <h3 className="text-sm font-black text-slate-800">Siap Latihan {mode}?</h3>
+                  <h3 className="text-sm font-black text-slate-800 tracking-tight">Siap Latihan {mode}?</h3>
                 </div>
                 <div className="space-y-3">
                   <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Gaya Soal</p>
@@ -333,7 +361,7 @@ const LearnPage = ({ mode, setMode }) => {
           </div>
         ) : (
           <>
-            {/* Answer Phase: Question Header */}
+            {/* Answer Phase: Question Display */}
             {aiSubMode === 'latihan' && currentQuestion && (
               <div className="p-6 bg-slate-50 relative border-b border-slate-100 animate-fade">
                 <div className="flex justify-between items-start mb-3">
@@ -353,7 +381,7 @@ const LearnPage = ({ mode, setMode }) => {
               </div>
             )}
 
-            {/* Hint Display */}
+            {/* Hint Rendering */}
             {aiSubMode === 'latihan' && hints.length > 0 && (
               <div className="px-6 pt-4 space-y-2.5 animate-fade">
                 {hints.map((h, i) => (
@@ -365,7 +393,7 @@ const LearnPage = ({ mode, setMode }) => {
               </div>
             )}
 
-            {/* Input / ABCDE Grid */}
+            {/* Answer Input Area */}
             <div className="flex-1 p-6 flex flex-col gap-4">
               {aiSubMode === 'latihan' && parsedOptions.length > 0 ? (
                 <div className={`grid gap-2.5 animate-fade ${parsedOptions.length <= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -387,7 +415,7 @@ const LearnPage = ({ mode, setMode }) => {
               </div>
             </div>
 
-            {/* Action Footer */}
+            {/* Footer Interaction */}
             <div className="p-5 flex flex-wrap gap-2.5 items-center justify-between bg-slate-50/50 border-t border-slate-100">
               <div className="flex items-center gap-2">
                 {aiSubMode === 'latihan' && phase === 'menjawab' && (
@@ -412,7 +440,7 @@ const LearnPage = ({ mode, setMode }) => {
         )}
       </div>
 
-      {/* Error Reporting */}
+      {/* Error View */}
       {errorMsg && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-600 text-[11px] font-bold animate-fade flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-2"><XCircle size={16} /> {errorMsg}</div>
@@ -420,7 +448,7 @@ const LearnPage = ({ mode, setMode }) => {
         </div>
       )}
       
-      {/* Discussion Area */}
+      {/* Feedback & Discussion Result */}
       {result && (
         <div className="animate-fade space-y-4 pt-2">
           {aiSubMode === 'latihan' && scoreStatus && (
