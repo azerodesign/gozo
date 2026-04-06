@@ -5,27 +5,27 @@ import {
   Sparkles, Search, XCircle, CheckCircle2, RotateCcw, 
   Zap, Copy, Check, Loader2, ChevronRight, List, ArrowLeft
 } from 'lucide-react';
-// PERBAIKAN: callGPT dihapus karena migrasi total ke DeepSeek
 import { renderMarkdown, parseScoreStatus } from '../utils/api';
 
-// PERBAIKAN: Konfigurasi API DeepSeek dengan URL yang benar
-const DEEPSEEK_API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY;
-const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
+// PERBAIKAN: Konfigurasi Cerebras AI & Model Terbaru
+const CEREBRAS_API_KEY = import.meta.env.VITE_CEREBRAS_API_KEY;
+const CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions";
 
-// PERBAIKAN: Fungsi callDeepSeek yang robust untuk semua kebutuhan (Latihan, Analisis, Koreksi)
-const callDeepSeek = async (messages, systemPrompt, isJsonMode = false) => {
+// PERBAIKAN: Fungsi callCerebras robust dengan retry 429 & JSON mode
+const callCerebras = async (messages, systemPrompt, isJsonMode = false) => {
   try {
-    const response = await fetch(DEEPSEEK_URL, {
+    const response = await fetch(CEREBRAS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+        'Authorization': `Bearer ${CEREBRAS_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'qwen-3-235b-a22b-instruct-2507',
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
         response_format: isJsonMode ? { type: 'json_object' } : undefined,
-        temperature: 0.7
+        temperature: 0.7,
+        max_completion_tokens: 8192 // Kapasitas besar untuk bulk 40 soal
       })
     });
     
@@ -33,7 +33,7 @@ const callDeepSeek = async (messages, systemPrompt, isJsonMode = false) => {
     const data = await response.json();
     return data.choices?.[0]?.message?.content || null;
   } catch (err) {
-    console.error("DeepSeek Connection Error:", err);
+    console.error("Cerebras Engine Error:", err);
     throw err;
   }
 };
@@ -48,7 +48,7 @@ const LearnPage = ({ mode, setMode }) => {
   const [errorMsg, setErrorMsg] = useState(null);
   const [copied, setCopied] = useState(false);
 
-  // States Soal & Jawaban
+  // States Latihan & Bulk
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [concepts, setConcepts] = useState([]);
   const [phase, setPhase] = useState('idle'); // 'idle' | 'bulk_list' | 'menjawab' | 'selesai'
@@ -57,12 +57,10 @@ const LearnPage = ({ mode, setMode }) => {
   const [loadingHint, setLoadingHint] = useState(false);
   const [parsedOptions, setParsedOptions] = useState([]);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
-
-  // States Bulk Generate
   const [bulkQuestions, setBulkQuestions] = useState([]);
   const [targetCount, setTargetCount] = useState(5);
 
-  // Loading & Progress
+  // UI Progress
   const [loadingStep, setLoadingStep] = useState(null);
   const [loadingTimer, setLoadingTimer] = useState(0);
   const [soalStyle, setSoalStyle] = useState('standard');
@@ -71,7 +69,7 @@ const LearnPage = ({ mode, setMode }) => {
 
   // --- 2. PERSISTENCE (LocalStorage Only) ---
   useEffect(() => {
-    // PERBAIKAN: Neon DB dinonaktifkan, full localStorage untuk stabilitas sementara
+    // PERBAIKAN: Neon DB dinonaktifkan total sesuai instruksi Zero
     const saved = localStorage.getItem('gozo_active_session');
     if (saved) {
       try {
@@ -116,9 +114,9 @@ const LearnPage = ({ mode, setMode }) => {
   // --- 3. UTILITIES ---
   const handleError = (err) => {
     if (err.message === "429") {
-      setErrorMsg("Waduh, DeepSeek lagi padet banget (Rate Limit). Tunggu 1 menit ya!");
+      setErrorMsg("Cerebras lagi sibuk melayani user lain. Tunggu semenit ya!");
     } else {
-      setErrorMsg("Koneksi ke otak AI terganggu. Cek sinyal kamu bentar.");
+      setErrorMsg("Gagal menghubungi otak AI. Cek sinyal atau API Key Cerebras kamu.");
     }
   };
 
@@ -135,7 +133,7 @@ const LearnPage = ({ mode, setMode }) => {
 
   // --- 4. CORE HANDLERS ---
 
-  // PERBAIKAN: handleMintaSoal dengan retry logic + JSON sanitization
+  // PERBAIKAN: handleMintaSoal dengan retry logic otomatis
   const handleMintaSoal = async (retryCount = 0) => {
     if (retryCount === 0) {
       localStorage.removeItem('gozo_active_session');
@@ -155,16 +153,15 @@ const LearnPage = ({ mode, setMode }) => {
 
     try {
       setLoadingStep('generating');
-      const res = await callDeepSeek([{ role: 'user', content: `Buatkan ${targetCount} soal.` }], system, true);
+      const res = await callCerebras([{ role: 'user', content: `Buatkan ${targetCount} soal.` }], system, true);
       
       if (res) {
-        // PERBAIKAN: Sanitasi string sebelum parse JSON untuk menghindari error markdown
         const cleanJson = res.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(cleanJson);
         const questions = parsed.questions || [];
         
         setLoadingStep('done');
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 400));
         clearInterval(timerInterval);
 
         if (questions.length > 1) {
@@ -185,7 +182,6 @@ const LearnPage = ({ mode, setMode }) => {
       }
     } catch (err) {
       clearInterval(timerInterval);
-      // PERBAIKAN: Retry otomatis jika kena rate limit (429)
       if (err.message === "429" && retryCount < 2) {
         await new Promise(r => setTimeout(r, 2000));
         return handleMintaSoal(retryCount + 1);
@@ -204,27 +200,27 @@ const LearnPage = ({ mode, setMode }) => {
     saveSession({ phase: 'menjawab', currentQuestion: qObj.question, parsedOptions: qObj.options });
   };
 
-  // PERBAIKAN: handleAnalisisSoal migrasi ke DeepSeek
+  // PERBAIKAN: Analisis menggunakan Cerebras Qwen-3
   const handleAnalisisSoal = async () => {
     if (!input.trim()) return;
     setLoading(true); setResult(''); setErrorMsg(null);
-    const system = "Kamu Gozo AI. Analisis soal SMP Kelas 9 ini. Berikan solusi langkah demi langkah yang logis. Format Markdown.";
+    const system = "Kamu Gozo AI. Analisis soal SMP Kelas 9 ini. Jelaskan langkah demi langkah dengan logis. Format Markdown.";
     try {
-      const res = await callDeepSeek([{ role: 'user', content: input }], system);
+      const res = await callCerebras([{ role: 'user', content: input }], system);
       if (res) setResult(res);
     } catch (err) { handleError(err); }
     setLoading(false);
   };
 
-  // PERBAIKAN: handleKoreksiJawaban migrasi ke DeepSeek
+  // PERBAIKAN: Koreksi menggunakan Cerebras Qwen-3
   const handleKoreksiJawaban = async () => {
     const finalAnswer = selectedAnswer ? `${selectedAnswer.label}. ${selectedAnswer.text}` : input;
     if (!finalAnswer.trim()) return;
 
     setLoading(true);
-    const system = "Kamu Gozo AI. Koreksi jawaban user. Baris 1 HARUS: [CORRECT], [PARTIAL], atau [WRONG]. Berikan pembahasan mendalam. Format Markdown.";
+    const system = "Kamu Gozo AI. Koreksi jawaban user. Baris 1: [CORRECT], [PARTIAL], atau [WRONG]. Lalu pembahasan mendalam. Format Markdown.";
     try {
-      const res = await callDeepSeek([{ role: 'user', content: `Soal: ${currentQuestion}\nJawaban User: ${finalAnswer}` }], system);
+      const res = await callCerebras([{ role: 'user', content: `Soal: ${currentQuestion}\nJawaban User: ${finalAnswer}` }], system);
       if (res) {
         const { status, cleanText } = parseScoreStatus(res);
         setScoreStatus(status);
@@ -242,7 +238,7 @@ const LearnPage = ({ mode, setMode }) => {
     setLoadingHint(true);
     const system = "Berikan hint strategis tanpa jawaban. Balas JSON: {\"hint\": \"...\"}";
     try {
-      const res = await callDeepSeek([{ role: 'user', content: currentQuestion }], system, true);
+      const res = await callCerebras([{ role: 'user', content: currentQuestion }], system, true);
       if (res) {
         const cleanJson = res.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(cleanJson);
@@ -260,11 +256,11 @@ const LearnPage = ({ mode, setMode }) => {
   return (
     <div className="animate-fade space-y-4 pb-10">
       
-      {/* Session Monitor */}
+      {/* Tracker Sesi */}
       {aiSubMode === 'latihan' && sessionStats.total > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sesi Belajar</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Progress Latihan</span>
             <div className="flex gap-2 font-bold text-[10px]">
               <span className="text-green-600">✅ {sessionStats.correct}</span>
               <span className="text-yellow-600">💪 {sessionStats.partial}</span>
@@ -277,11 +273,11 @@ const LearnPage = ({ mode, setMode }) => {
         </div>
       )}
 
-      {/* Mode Toggle */}
+      {/* Mode Switch */}
       <div className="flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm">
         {['analisis', 'latihan'].map(m => (
           <button key={m} onClick={() => {setAiSubMode(m); setPhase('idle'); setErrorMsg(null); setResult('');}} 
-            className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center justify-center gap-2 ${aiSubMode === m ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>
+            className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center justify-center gap-2 ${aiSubMode === m ? 'bg-slate-900 text-white shadow-lg shadow-slate-200' : 'text-slate-400 hover:bg-slate-50'}`}>
             {m === 'analisis' ? <Search size={14}/> : <Sparkles size={14}/>} {m}
           </button>
         ))}
@@ -294,7 +290,7 @@ const LearnPage = ({ mode, setMode }) => {
         ))}
       </div>
 
-      {/* Interaction Container */}
+      {/* Main Container */}
       <div className={`bg-white rounded-[2rem] shadow-sm border transition-all duration-300 min-h-[260px] flex flex-col overflow-hidden ${isFocused ? 'border-[#498FFF] ring-4 ring-blue-50' : 'border-slate-200'}`}>
         
         {/* IDLE: Generator Settings */}
@@ -304,22 +300,22 @@ const LearnPage = ({ mode, setMode }) => {
               <div className="w-full space-y-6">
                 <div className="space-y-1">
                   <div className="w-14 h-14 bg-[#498FFF]/10 rounded-2xl flex items-center justify-center text-[#498FFF] mx-auto mb-3"><Target size={28}/></div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tighter italic">DeepSeek V3 Engine</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase italic tracking-widest">{mode} • Kelas 9 SMP</p>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tighter italic tracking-widest">Cerebras AI Engine</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase italic tracking-widest">Qwen-3-235B • Kelas 9 SMP</p>
                 </div>
 
                 <div className="space-y-4">
                   <div>
-                    <p className="text-[9px] uppercase font-black text-slate-300 tracking-widest mb-2">Pilih Kesulitan</p>
+                    <p className="text-[9px] uppercase font-black text-slate-300 tracking-widest mb-2 text-center">Gaya Soal</p>
                     <div className="grid grid-cols-3 gap-2 px-2">
-                      {[{id:'standard', i:'🎯', l:'Easy'}, {id:'challenging', i:'🔥', l:'Hard'}, {id:'story', i:'📖', l:'Story'}].map(s => (
+                      {[{id:'standard', i:'🎯', l:'Standard'}, {id:'challenging', i:'🔥', l:'Sulit'}, {id:'story', i:'📖', l:'Cerita'}].map(s => (
                         <button key={s.id} onClick={() => setSoalStyle(s.id)} className={`py-3 rounded-2xl text-[10px] font-black flex flex-col items-center gap-1 transition-all ${soalStyle === s.id ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}><span>{s.i}</span> {s.l}</button>
                       ))}
                     </div>
                   </div>
 
                   <div>
-                    <p className="text-[9px] uppercase font-black text-slate-300 tracking-widest mb-2">Kuantitas Soal</p>
+                    <p className="text-[9px] uppercase font-black text-slate-300 tracking-widest mb-2 text-center">Jumlah Soal</p>
                     <div className="flex justify-center gap-2">
                       {[1, 5, 10, 20, 40].map(c => (
                         <button key={c} onClick={() => setTargetCount(c)} className={`w-10 h-10 rounded-xl text-[10px] font-black transition-all ${targetCount === c ? 'bg-[#498FFF] text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{c}</button>
@@ -336,7 +332,7 @@ const LearnPage = ({ mode, setMode }) => {
               <div className="w-full max-w-[240px] space-y-6 py-4 animate-fade">
                 <div className="space-y-2 text-left">
                   <div className="flex justify-between items-center px-1">
-                    <span className="text-[10px] font-black text-[#498FFF] uppercase">Processing</span>
+                    <span className="text-[10px] font-black text-[#498FFF] uppercase tracking-widest">Inference Speed</span>
                     <span className="text-[10px] text-slate-400 font-mono">{(loadingTimer/10).toFixed(1)}s</span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -345,9 +341,9 @@ const LearnPage = ({ mode, setMode }) => {
                 </div>
                 <div className="space-y-3">
                   {[
-                    {k:'connecting', i:'⚙️', t:'Contacting DeepSeek...'},
-                    {k:'generating', i:'🧠', t: `Drafting ${targetCount} tasks...`},
-                    {k:'done', i:'✅', t:'Tasks Ready!'}
+                    {k:'connecting', i:'⚙️', t:'Contacting Cerebras...'},
+                    {k:'generating', i:'🧠', t: `Qwen-3 drafting ${targetCount} tasks...`},
+                    {k:'done', i:'✅', t:'Packet Received!'}
                   ].map((s, idx) => {
                     const stepIdx = ['connecting', 'generating', 'done'].indexOf(loadingStep);
                     const isDone = idx < stepIdx;
@@ -364,7 +360,7 @@ const LearnPage = ({ mode, setMode }) => {
             )}
           </div>
         ) : phase === 'bulk_list' ? (
-          /* BULK LIST: Tampilan Koleksi Soal */
+          /* BULK LIST: Koleksi Soal Ter-generate */
           <div className="flex-1 flex flex-col p-6 animate-fade max-h-[550px]">
              <div className="flex items-center justify-between mb-5">
                 <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><List size={14}/> Koleksi Soal ({bulkQuestions.length})</h3>
@@ -383,7 +379,7 @@ const LearnPage = ({ mode, setMode }) => {
              </div>
           </div>
         ) : (
-          /* ACTIVE TASK: Tampilan Pengerjaan */
+          /* ACTIVE SOAL: Tampilan Menjawab */
           <>
             {aiSubMode === 'latihan' && currentQuestion && (
               <div className="p-6 bg-slate-50 relative border-b border-slate-100 animate-fade">
@@ -405,7 +401,7 @@ const LearnPage = ({ mode, setMode }) => {
               <div className="px-6 pt-4 space-y-2 animate-fade">
                 {hints.map((h, i) => (
                   <div key={i} className={`p-3.5 rounded-2xl border border-blue-100 bg-blue-50/30 text-[10px] text-blue-800 font-medium leading-relaxed`}>
-                    <span className="font-black uppercase tracking-tighter block mb-1 text-blue-400">💡 Hint {i+1}</span>
+                    <span className="font-black uppercase tracking-tighter block mb-1 text-blue-400 italic">💡 Hint {i+1}</span>
                     {h}
                   </div>
                 ))}
@@ -457,20 +453,20 @@ const LearnPage = ({ mode, setMode }) => {
         </div>
       )}
       
-      {/* FINAL RESULTS & FEEDBACK */}
+      {/* FINAL RESULTS AREA */}
       {result && (
         <div className="animate-fade space-y-4 pt-2">
           {scoreStatus && (
-            <div className={`p-5 rounded-3xl border-2 flex items-center gap-4 shadow-sm ${scoreStatus === 'correct' ? 'bg-green-50 border-green-200 text-green-700' : scoreStatus === 'partial' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+            <div className={`p-5 rounded-3xl border-2 flex items-center gap-4 shadow-sm ${scoreStatus === 'correct' ? 'bg-green-50 border-green-200 text-green-700' : scoreStatus === 'partial' ? 'bg-yellow-50 border-yellow-300 text-yellow-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
               <div className="p-2 bg-white rounded-2xl shadow-sm">{scoreStatus === 'correct' ? <CheckCircle2 size={24}/> : <Zap size={24}/>}</div>
               <div className="flex flex-col">
-                <span className="font-black text-sm uppercase tracking-tight">{scoreStatus === 'correct' ? "Luar Biasa! 🎉" : scoreStatus === 'partial' ? "Dikit Lagi! 💪" : "Ayo Belajar! 📚"}</span>
-                <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest mt-0.5">Analisis DeepSeek tersedia di bawah</span>
+                <span className="font-black text-sm uppercase tracking-tight tracking-widest">{scoreStatus === 'correct' ? "Luar Biasa! 🎉" : scoreStatus === 'partial' ? "Sedikit Lagi! 💪" : "Ayo Belajar! 📚"}</span>
+                <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest mt-0.5">Analisis Qwen-3 tersedia di bawah</span>
               </div>
             </div>
           )}
           <div className="bg-white rounded-[2rem] p-7 border border-slate-200 shadow-sm relative group">
-            <div className="flex items-center gap-2 text-[10px] font-black text-[#FFBA49] uppercase tracking-[0.2em] mb-6"><Zap size={14} fill="currentColor"/> Pembahasan DeepSeek</div>
+            <div className="flex items-center gap-2 text-[10px] font-black text-[#FFBA49] uppercase tracking-[0.2em] mb-6"><Zap size={14} fill="currentColor"/> Pembahasan AI</div>
             <div className="text-[13px] text-slate-700 leading-[1.8] font-medium prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: renderMarkdown(result) }} />
           </div>
           <button onClick={() => { if(bulkQuestions.length > 1) setPhase('bulk_list'); else setPhase('idle'); }} 
@@ -484,4 +480,3 @@ const LearnPage = ({ mode, setMode }) => {
 };
 
 export default LearnPage;
-
